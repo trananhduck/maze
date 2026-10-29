@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mê cung trí nhớ</title>
+<style>
+:root{--bg:#e9eef2;--card:#fff;--ink:#14213d;--mut:#5d6b82;--acc:#0b7a75;--ok:#1f9d55;--bad:#d64545;--wall:#14213d;--cell:#f4f7fa;--path:#9fdcd6;--line:#b9c4d2;--sol:#e08a00}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1722;--card:#18222f;--ink:#e8eef6;--mut:#93a1b5;--acc:#3cc4bb;--wall:#e8eef6;--cell:#223041;--path:#1f6d6a;--line:#3a4a60;--sol:#ffb340}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Trebuchet MS","Segoe UI",system-ui,sans-serif;min-height:100vh;display:flex;justify-content:center;padding:16px}
+main{width:100%;max-width:640px}
+h1{font-size:1.6rem;margin:4px 0 14px;letter-spacing:-.01em}
+.card{background:var(--card);border-radius:14px;padding:18px;border:2px solid var(--ink)}
+label{display:block;font-weight:700;margin:14px 0 6px}
+.seg{display:flex;gap:8px}
+.seg button{flex:1}
+button{font:inherit;font-weight:700;padding:9px 14px;border-radius:10px;border:2px solid var(--ink);background:var(--card);color:var(--ink);cursor:pointer}
+button:hover:not(:disabled){background:var(--cell)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.on,button.pri{background:var(--ink);color:var(--card)}
+button.pri:hover:not(:disabled){background:var(--acc);color:#fff}
+input[type=number]{font:inherit;width:110px;padding:8px;border:2px solid var(--ink);border-radius:10px;background:var(--card);color:var(--ink)}
+.hint{color:var(--mut);font-size:.9rem;margin:6px 0 0}
+#info{min-height:48px;margin:0 0 8px}
+#stage{background:var(--card);border:2px solid var(--ink);border-radius:14px;padding:6px}
+#stage svg{display:block;width:100%;height:auto;user-select:none;-webkit-tap-highlight-color:transparent}
+.cell{cursor:pointer}
+.hit{fill:transparent;cursor:pointer}.hit:hover{fill:var(--acc);fill-opacity:.35}
+#msg{min-height:28px;margin:10px 0 0;font-weight:700}
+#msg.ok{color:var(--ok)}#msg.bad{color:var(--bad)}
+#bar{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.ready{padding:48px 16px;text-align:center}
+.ready b{font-size:1.2rem}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Mê cung trí nhớ</h1>
+
+<section id="setup" class="card">
+  <label>Kích cỡ mê cung</label>
+  <div class="seg" id="sizes"></div>
+  <label for="T">Thời gian ghi nhớ (giây)</label>
+  <input type="number" id="T" min="1" max="600" value="15">
+  <p class="hint">Người lập mê cung đặt tường, sau đó đưa máy cho người chơi ghi nhớ. Hết giờ, tường biến mất và người chơi phải vẽ lại đường đi.</p>
+  <div id="bar0" style="margin-top:16px"><button class="pri" onclick="startEdit()">Lập mê cung</button></div>
+</section>
+
+<section id="game" hidden>
+  <p id="info"></p>
+  <div id="stage"></div>
+  <p id="msg"></p>
+  <div id="bar"></div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const S=44,P=40;
+let n=5,T=15,walls=new Set(),hist=[],path=[],phase='setup',timer=null,skipFn=null;
+let peeked=false,peekOn=false,showAns=false,submitted=null,msg='',msgCls='';
+const lim=()=>(n-1)**2;
+const mn=()=>Math.ceil(lim()/2);
+const K=(t,r,c)=>t+r+'_'+c;
+
+// ---- chọn cỡ
+$('sizes').innerHTML=[5,7,10].map(v=>`<button data-n="${v}" class="${v===n?'on':''}">${v} × ${v}</button>`).join('');
+$('sizes').onclick=e=>{const v=e.target.dataset.n;if(!v)return;n=+v;[...$('sizes').children].forEach(b=>b.classList.toggle('on',+b.dataset.n===n));};
+
+// ---- logic mê cung
+function blocked(r,c,r2,c2){
+  let k;
+  if(r2===r+1)k=K('h',r2,c);else if(r2===r-1)k=K('h',r,c);
+  else if(c2===c+1)k=K('v',r,c2);else k=K('v',r,c);
+  return walls.has(k);
+}
+const D=[[1,0],[-1,0],[0,1],[0,-1]];
+function solve(){
+  const prev={},q=[[0,0]];prev['0,0']=null;
+  while(q.length){
+    const [r,c]=q.shift();
+    if(r===n-1&&c===n-1){const p=[];let cur=[r,c];while(cur){p.unshift(cur);cur=prev[cur[0]+','+cur[1]];}return p;}
+    for(const [dr,dc] of D){
+      const a=r+dr,b=c+dc;
+      if(a<0||b<0||a>=n||b>=n||(a+','+b) in prev||blocked(r,c,a,b))continue;
+      prev[a+','+b]=[r,c];q.push([a,b]);
+    }
+  }
+  return null;
+}
+function randomWalls(){
+  const all=[];
+  for(let r=1;r<n;r++)for(let c=0;c<n;c++)all.push(K('h',r,c));
+  for(let r=0;r<n;r++)for(let c=1;c<n;c++)all.push(K('v',r,c));
+  const w=new Set(all),seen=new Set(['0,0']),st=[[0,0]];
+  while(st.length){
+    const [r,c]=st[st.length-1];
+    const nb=D.map(([a,b])=>[r+a,c+b]).filter(([a,b])=>a>=0&&b>=0&&a<n&&b<n&&!seen.has(a+','+b));
+    if(!nb.length){st.pop();continue;}
+    const [a,b]=nb[Math.floor(Math.random()*nb.length)];
+    seen.add(a+','+b);st.push([a,b]);
+    w.delete(a===r+1?K('h',a,c):a===r-1?K('h',r,c):b===c+1?K('v',r,b):K('v',r,c));
+  }
+  return w;
+}
+
+// ---- vẽ
+function render(){
+  const st=$('stage');
+  if(phase==='ready'){st.innerHTML=`<div class="ready"><b>Đưa máy cho người chơi</b><p>Bạn có ${T} giây để ghi nhớ mê cung.<br>Đồng hồ chỉ chạy khi bấm “Bắt đầu”.</p></div>`;return;}
+  const showW=phase==='edit'||phase==='memo'||peekOn||showAns;
+  const W=n*S+2*P,X=v=>P+v*S,M=v=>X(v)+S/2;
+  const ln=(a,b,c,d,x='')=>`<line x1="${a}" y1="${b}" x2="${c}" y2="${d}" stroke="var(--wall)" stroke-width="4.5" stroke-linecap="round" ${x}/>`;
+  const live=phase==='play'&&!peekOn;
+  const idx=new Set(path.map(p=>p+''));
+  let h=`<svg viewBox="0 0 ${W} ${W}">`;
+  for(let r=0;r<n;r++)for(let c=0;c<n;c++){
+    const on=live&&idx.has(r+','+c);
+    const f=on?(submitted?(submitted.ok?'var(--ok)':'var(--bad)'):'var(--path)'):'var(--cell)';
+    h+=`<rect class="${phase==='play'?'cell':''}" data-r="${r}" data-c="${c}" x="${X(c)+2}" y="${X(r)+2}" width="${S-4}" height="${S-4}" rx="7" fill="${f}" ${on&&submitted?'fill-opacity=".55"':''}/>`;
+  }
+  h+=`<text x="${P-8}" y="${M(0)+4}" text-anchor="end" font-size="11" font-weight="700" fill="var(--acc)">VÀO ▸</text>`;
+  h+=`<text x="${X(n)+8}" y="${M(n-1)+4}" font-size="11" font-weight="700" fill="var(--acc)">▸ RA</text>`;
+  h+=ln(X(0),X(0),X(n),X(0))+ln(X(0),X(n),X(n),X(n));
+  for(let r=0;r<n;r++){if(r>0)h+=ln(X(0),X(r),X(0),X(r+1));if(r<n-1)h+=ln(X(n),X(r),X(n),X(r+1));}
+  h+=ln(X(0),X(0),X(0),X(0));
+  if(showW)for(const k of walls){
+    const [r,c]=k.slice(1).split('_').map(Number);
+    h+=k[0]==='h'?ln(X(c),X(r),X(c+1),X(r)):ln(X(c),X(r),X(c),X(r+1));
+  }
+  if(live&&path.length>1)h+=`<polyline pointer-events="none" fill="none" stroke="${submitted?(submitted.ok?'var(--ok)':'var(--bad)'):'var(--acc)'}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" points="${path.map(([r,c])=>M(c)+','+M(r)).join(' ')}"/>`;
+  if(showAns){const s=solve();if(s)h+=`<polyline pointer-events="none" fill="none" stroke="var(--sol)" stroke-width="5" stroke-dasharray="2 9" stroke-linecap="round" stroke-linejoin="round" points="${s.map(([r,c])=>M(c)+','+M(r)).join(' ')}"/>`;}
+  if(live&&path.length){const [r,c]=path[path.length-1];h+=`<circle pointer-events="none" cx="${M(c)}" cy="${M(r)}" r="7" fill="var(--wall)"/>`;}
+  if(phase==='edit'){
+    const hit=(k,x,y,w,hh,g)=>(walls.has(k)?'':g)+`<rect class="hit" data-k="${k}" x="${x}" y="${y}" width="${w}" height="${hh}" rx="6"/>`;
+    for(let r=1;r<n;r++)for(let c=0;c<n;c++)h+=hit(K('h',r,c),X(c)+4,X(r)-10,S-8,20,`<line pointer-events="none" x1="${X(c)+6}" y1="${X(r)}" x2="${X(c+1)-6}" y2="${X(r)}" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="1 6" stroke-linecap="round"/>`);
+    for(let r=0;r<n;r++)for(let c=1;c<n;c++)h+=hit(K('v',r,c),X(c)-10,X(r)+4,20,S-8,`<line pointer-events="none" x1="${X(c)}" y1="${X(r)+6}" x2="${X(c)}" y2="${X(r+1)-6}" stroke="var(--line)" stroke-width="2.5" stroke-dasharray="1 6" stroke-linecap="round"/>`);
+  }
+  st.innerHTML=h+'</svg>';
+}
+
+// ---- giao diện theo pha
+function ui(){
+  $('setup').hidden=phase!=='setup';$('game').hidden=phase==='setup';
+  const b=(l,f,c='',d=false)=>`<button class="${c}" ${d?'disabled':''} onclick="${f}">${l}</button>`;
+  let bar='',info='';
+  if(phase==='edit'){
+    info=`Bấm vào cạnh giữa hai ô để đặt hoặc bỏ tường. Đã đặt <b>${walls.size}</b> tường (cần từ ${mn()} đến ${lim()}).`;
+    bar=b('Undo','undoW()','',!hist.length)+b('Xóa hết','clearW()','',!walls.size)+b('Tạo ngẫu nhiên','randW()')+b('Xong, chuyển sang ghi nhớ','done()','pri')+b('Đổi cỡ','toSetup()');
+  }else if(phase==='ready'){
+    info=`Mê cung ${n} × ${n} đã sẵn sàng.`;bar=b('Bắt đầu ghi nhớ','startMemo()','pri');
+  }else if(phase==='memo'){
+    info=`Ghi nhớ mê cung. Còn <b id="tm">${T}</b> giây.`;
+    bar=b('Xem xong sớm','skipTimer()','pri');
+  }else if(phase==='play'){
+    if(peekOn){
+        info=`Xem lại mê cung. Còn <b id="tm">${T}</b> giây, sau đó đường đi của bạn sẽ bị xóa để chơi lại.`;
+        bar=b('Xem xong sớm','skipTimer()','pri');
+    }
+    else if(showAns)info='Đáp án: đường chấm cam là lối đi ngắn nhất.';
+    else info='Bấm vào các ô liền kề để vẽ đường từ lối vào (VÀO) đến lối ra (RA), rồi nộp bài.';
+    if(!peekOn)bar=b('Undo','undoP()','',!!submitted||showAns||path.length<2)+b('Restart','restart()')
+      +b(peeked?'Đã xem lại':'Xem lại mê cung (1 lần)','peek()','',peeked||!!submitted||showAns)
+      +b('Nộp bài','submit()','pri',!!submitted||showAns)+b('Xem đáp án','answer()','',showAns)+b('Màn mới','toSetup()');
+  }
+  $('info').innerHTML=info;$('bar').innerHTML=bar;
+  $('msg').textContent=msg;$('msg').className=msgCls;
+  render();
+}
+function say(t,c=''){msg=t;msgCls=c;$('msg').textContent=t;$('msg').className=c;}
+
+// ---- đếm ngược & bỏ qua đếm ngược
+function cd(next){
+  clearInterval(timer);const end=Date.now()+T*1000;
+  skipFn = () => { clearInterval(timer); skipFn=null; next(); };
+  const tick=()=>{const l=Math.ceil((end-Date.now())/1000),e=$('tm');if(e)e.textContent=Math.max(l,0);if(l<=0)skipFn();};
+  tick();timer=setInterval(tick,200);
+}
+function skipTimer(){ if(skipFn) skipFn(); }
+
+// ---- hành động
+function startEdit(){
+  T=Math.max(1,Math.min(600,parseInt($('T').value)||15));
+  walls=new Set();hist=[];msg='';msgCls='';phase='edit';ui();
+}
+function toSetup(){clearInterval(timer);skipFn=null;phase='setup';peekOn=false;showAns=false;submitted=null;ui();}
+function toggleWall(k){
+  if(walls.has(k))walls.delete(k);
+  else{if(walls.size>=lim()){say(`Tối đa ${lim()} tường cho mê cung ${n} × ${n}. Hãy bỏ bớt tường trước.`,'bad');return;}walls.add(k);}
+  hist.push(k);msg='';ui();
+}
+function undoW(){const k=hist.pop();if(!k)return;walls.has(k)?walls.delete(k):walls.add(k);msg='';ui();}
+function clearW(){walls=new Set();hist=[];msg='';ui();}
+function randW(){walls=randomWalls();hist=[];msg='';ui();}
+function done(){
+  if(walls.size<mn()){say(`Cần ít nhất ${mn()} tường để mê cung đủ khó (hiện có ${walls.size}).`,'bad');return;}
+  if(!solve()){say('Không có đường từ lối vào đến lối ra. Hãy bỏ bớt tường.','bad');return;}
+  peeked=false;peekOn=false;showAns=false;submitted=null;path=[[0,0]];msg='';phase='ready';ui();
+}
+function startMemo(){phase='memo';msg='';ui();cd(()=>{phase='play';ui();});}
+function peek(){
+  if(peeked)return;peeked=true;peekOn=true;path=[[0,0]];submitted=null;msg='';ui();
+  cd(()=>{peekOn=false;ui();});
+}
+function step(r,c){
+  if(phase!=='play'||peekOn||showAns||submitted)return;
+  const [lr,lc]=path[path.length-1];
+  if(Math.abs(lr-r)+Math.abs(lc-c)!==1||path.some(p=>p[0]===r&&p[1]===c))return;
+  path.push([r,c]);ui();
+}
+function undoP(){if(path.length>1){path.pop();ui();}}
+function restart(){path=[[0,0]];submitted=null;showAns=false;msg='';ui();}
+function submit(){
+  const [r,c]=path[path.length-1];let ok=true,t='Chính xác! Bạn đã nhớ đúng mê cung.';
+  if(r!==n-1||c!==n-1){ok=false;t='Sai: đường đi chưa tới lối ra.';}
+  else for(let i=1;i<path.length;i++)if(blocked(...path[i-1],...path[i])){ok=false;t='Sai: đường đi của bạn băng qua tường.';break;}
+  submitted={ok};msg=t;msgCls=ok?'ok':'bad';ui();
+}
+function answer(){showAns=true;ui();}
+
+$('stage').addEventListener('click',e=>{
+  const t=e.target;
+  if(t.dataset.k&&phase==='edit')toggleWall(t.dataset.k);
+  else if(t.classList.contains('cell'))step(+t.dataset.r,+t.dataset.c);
+});
+ui();
+</script>
+</body>
+</html>
